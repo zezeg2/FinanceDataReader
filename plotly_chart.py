@@ -16,25 +16,24 @@ __fact_def_params = {  # factory default params
     'mfi': False,
     'rsi': False,
     'trend_following': False,
-    'i_trend_following': False,
+    'r_trend_following': False,
     'title': '',
     'ylabel': '',
     'moving_average_type': 'SMA',  # 'SMA', 'WMA', 'EMA'
     'moving_average_lines': (5, 20, 60),
+    'save':False
 }
 
-__plot_params = dict(__fact_def_params)
+color_dict = {0: '#FF7F50', 1: '#8FBC8F', 2: '#708090', 3: '#DDA0DD', 4: '#6A5ACD'}
 
-# tableau 10 colors for moving_average_lines
-tab_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
-              'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+__plot_params = dict(__fact_def_params)
 
 plotly_install_msg = '''
 FinanceDataReade.chart.plot() dependen on plotly
 plotly not installed please install as follows
 
 FinanceDataReade.chart.plot()는 plotly 의존성이 있습니다.
-명령창에서 다음과 같이 plotly 설치하세요
+명령창에서 다음과 같이 plotly 설치하세요.
 
 pip install plotly
 '''
@@ -65,6 +64,7 @@ def plot(df, start=None, end=None, **kwargs):
         import plotly.io as pio
         import plotly.graph_objects as go
         import plotly.subplots as ms
+        import plotly.io as pio
     except ModuleNotFoundError as e:
         raise ModuleNotFoundError(plotly_install_msg)
 
@@ -78,9 +78,6 @@ def plot(df, start=None, end=None, **kwargs):
 
     df = df.loc[start:end].copy()
 
-    # plot price OHLC candles
-    x = np.arange(len(df))
-    height = params['height']
     candle = go.Candlestick(
         x=df.index,
         open=df['Open'],
@@ -91,47 +88,79 @@ def plot(df, start=None, end=None, **kwargs):
         decreasing_line_color='blue',  # 하락봉 스타일링
     )
 
+    ma_type = params['moving_average_type']
+    weights = np.arange(240) + 1
+    # 이동평균선 기본값 20 입력
+    params['moving_average_lines'].insert(0,20)
+    moving_average_lines = []
+    for value in params['moving_average_lines']:
+        if value not in moving_average_lines:
+            moving_average_lines.append(value)
+
+    for n in moving_average_lines:  # moving average lines
+        if ma_type.upper() == 'SMA':
+            df[f'MA_{n}'] = df.Close.rolling(window=n).mean()
+        elif ma_type.upper() == 'WMA':
+            df[f'MA_{n}'] = df.Close.rolling(n).apply(
+                lambda prices: np.dot(prices, weights[:n]) / weights[:n].sum())
+        elif ma_type.upper() == 'EMA':
+            df[f'MA_{n}'] = df.Close.ewm(span=n).mean()
+        elif ma_type.upper() == 'NONE':
+            pass
+        else:
+            raise ValueError(f"moving_average_type '{ma_type}' is invalid")
+
+    df['ma_default'] = df['Close'].rolling(window=20).mean()  # 20일 이동평균
+    df['stddev_default'] = df['Close'].rolling(window=20).std()  # 20일 이동표준편차
+    df['upper_default'] = df['ma_default'] + 2 * df['stddev_default']  # 상단밴드
+    df['lower_default'] = df['ma_default'] - 2 * df['stddev_default']  # 하단밴드
+
+    df['PB'] = (df['Close'] - df['lower_default']) / (df['upper_default'] - df['lower_default'])
+    df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
+    df['PMF'] = 0
+    df['NMF'] = 0
+    for i in range(len(df.Close) - 1):
+        if df.TP.values[i] < df.TP.values[i + 1]:
+            df.PMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
+            df.NMF.values[i + 1] = 0
+        else:
+            df.NMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
+            df.PMF.values[i + 1] = 0
+    df['MFR'] = (df.PMF.rolling(window=10).sum() /
+                 df.NMF.rolling(window=10).sum())
+    df['MFI10'] = 100 - 100 / (1 + df['MFR'])
+
+    for ix, n in enumerate(moving_average_lines):
+        globals()['ma_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'MA_{n}'], line=dict(color=color_dict[ix], width=1),
+                                                  name=f'ma_{n}', showlegend=False)
+
     # number of row
-    nor = 1;
+    row_criteria = (2 if params['volume'] else 1)
+    nor = 0;
 
     # 보조 지표 옵션
     # 거래량
     if params['volume']:
-        nor += 1
-        volume_row = nor
         volume_bar = go.Bar(x=df.index, y=df['Volume'], showlegend=False,
                             marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
-
     # 볼린저 밴드
     if params['bollinger']:
-        ma_type = params['moving_average_type']
-        weights = np.arange(240) + 1
+        for ix, n in enumerate(moving_average_lines):
+            df[f'stddev_{n}'] = df['Close'].rolling(window=20).std()  # n일 이동표준편차
+            df[f'upper_{n}'] = df[f'MA_{n}'] + 2 * df[f'stddev_{n}']  # 상단밴드
+            df[f'lower_{n}'] = df[f'MA_{n}'] - 2 * df[f'stddev_{n}']  # 하단밴드
 
-        for n in params['moving_average_lines']:  # moving average lines
-            if ma_type.upper() == 'SMA':
-                df[f'MA_{n}'] = df.Close.rolling(window=n).mean()
-            elif ma_type.upper() == 'WMA':
-                df[f'MA_{n}'] = df.Close.rolling(n).apply(
-                    lambda prices: np.dot(prices, weights[:n]) / weights[:n].sum())
-            elif ma_type.upper() == 'EMA':
-                df[f'MA_{n}'] = df.Close.ewm(span=n).mean()
-            elif ma_type.upper() == 'NONE':
-                pass
-            else:
-                raise ValueError(f"moving_average_type '{ma_type}' is invalid")
-
-        df['ma20'] = df['Close'].rolling(window=20).mean()  # 20일 이동평균
-        df['stddev'] = df['Close'].rolling(window=20).std()  # 20일 이동표준편차
-        df['upper'] = df['ma20'] + 2 * df['stddev']  # 상단밴드
-        df['lower'] = df['ma20'] - 2 * df['stddev']  # 하단밴드
-        upper = go.Scatter(x=df.index, y=df['upper'], line=dict(color='red', width=2), name='upper', showlegend=False)
-        ma20 = go.Scatter(x=df.index, y=df['ma20'], line=dict(color='black', width=2), name='ma20', showlegend=False)
-        lower = go.Scatter(x=df.index, y=df['lower'], line=dict(color='blue', width=2), name='lower', showlegend=False)
+            globals()['upper_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'upper_{n}'],
+                                                         line=dict(color=color_dict[ix], width=1, dash='dot'), name=f'upper_{n}',
+                                                         showlegend=True)
+            globals()['lower_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'lower_{n}'],
+                                                         line=dict(color=color_dict[ix], width=1, dash='dot' ), name=f'lower_{n}',
+                                                         showlegend=True)
 
     # MACD
     if params['macd']:
         nor += 1
-        macd_row = nor
+        macd_row = row_criteria + nor
         df['ma12'] = df['Close'].rolling(window=12).mean()  # 12일 이동평균
         df['ma26'] = df['Close'].rolling(window=26).mean()  # 26일 이동평균
         df['MACD'] = df['ma12'] - df['ma26']  # MACD
@@ -146,7 +175,7 @@ def plot(df, start=None, end=None, **kwargs):
     # 스토캐스틱
     if params['stochastic']:
         nor += 1
-        stochastic_row = nor
+        stochastic_row = row_criteria + nor
         df['ndays_high'] = df['High'].rolling(window=14, min_periods=1).max()  # 14일 중 최고가
         df['ndays_low'] = df['Low'].rolling(window=14, min_periods=1).min()  # 14일 중 최저가
         df['fast_k'] = (df['Close'] - df['ndays_low']) / (df['ndays_high'] - df['ndays_low']) * 100  # Fast %K 구하기
@@ -159,21 +188,7 @@ def plot(df, start=None, end=None, **kwargs):
     # MFI
     if params['mfi']:
         nor += 1
-        mfi_row = nor
-        df['PB'] = (df['Close'] - df['lower']) / (df['upper'] - df['lower'])
-        df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
-        df['PMF'] = 0
-        df['NMF'] = 0
-        for i in range(len(df.Close) - 1):
-            if df.TP.values[i] < df.TP.values[i + 1]:
-                df.PMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
-                df.NMF.values[i + 1] = 0
-            else:
-                df.NMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
-                df.PMF.values[i + 1] = 0
-        df['MFR'] = (df.PMF.rolling(window=10).sum() /
-                     df.NMF.rolling(window=10).sum())
-        df['MFI10'] = 100 - 100 / (1 + df['MFR'])
+        mfi_row = row_criteria + nor
         PB = go.Scatter(x=df.index, y=df['PB'] * 100, line=dict(color='blue', width=2), name='PB', legendgroup='group4',
                         legendgrouptitle_text='PB, MFI')
         MFI10 = go.Scatter(x=df.index, y=df['MFI10'], line=dict(dash='dashdot', color='green', width=2), name='MFI10')
@@ -181,7 +196,7 @@ def plot(df, start=None, end=None, **kwargs):
     # RSI
     if params['rsi']:
         nor += 1
-        rsi_row = nor
+        rsi_row = row_criteria + nor
         U = np.where(df['Close'].diff(1) > 0, df['Close'].diff(1), 0)
         D = np.where(df['Close'].diff(1) < 0, df['Close'].diff(1) * (-1), 0)
         AU = pd.DataFrame(U, index=df.index).rolling(window=14).mean()
@@ -192,15 +207,38 @@ def plot(df, start=None, end=None, **kwargs):
                          legendgrouptitle_text='RSI')
 
     df = df[25:]
-    fig = ms.make_subplots(rows=nor, cols=1, shared_xaxes=True, vertical_spacing=0.02)
+
+    row_heights = [3 for i in range(row_criteria + nor)]
+    row_heights[0] = 7
+
+    fig = ms.make_subplots(rows= row_criteria + nor, cols=1, shared_xaxes=True, vertical_spacing=0.02,
+                                row_heights=row_heights)
+    fig.update_layout(
+        width=params['width'],
+        height= params['height'],
+        title=params['title'],
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=50, r=50, t=50, b=50),
+        plot_bgcolor = 'white'
+    )
+    fig.update_xaxes(tickformat='%y-%m-%d', zeroline=True, zerolinewidth=1, zerolinecolor='black', showgrid=True,
+                          gridwidth=1, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black',
+                          mirror=True)
+    fig.update_yaxes(title = params['ylabel'], tickformat=',d', zeroline=True, zerolinewidth=1, zerolinecolor='black', showgrid=True,
+                          gridwidth=1,
+                          gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
+    fig.update_traces(xhoverformat='%y년%m월%d일')
+
     fig.add_trace(candle, row=1, col=1)
+    for n in moving_average_lines:
+        fig.add_trace(globals()['ma_{}'.format(n)], row=1, col=1)
 
     if params['volume']:
-        fig.add_trace(volume_bar, row=volume_row, col=1)
+        fig.add_trace(volume_bar, row=2, col=1)
     if params['bollinger']:
-        fig.add_trace(upper, row=1, col=1)
-        fig.add_trace(ma20, row=1, col=1)
-        fig.add_trace(lower, row=1, col=1)
+        for n in moving_average_lines:
+            fig.add_trace(globals()['upper_{}'.format(n)], row=1, col=1)
+            fig.add_trace(globals()['lower_{}'.format(n)], row=1, col=1)
     if params['macd']:
         fig.add_trace(MACD, row=macd_row, col=1)
         fig.add_trace(MACD_Signal, row=macd_row, col=1)
@@ -211,54 +249,50 @@ def plot(df, start=None, end=None, **kwargs):
     if params['mfi']:
         fig.add_trace(PB, row=mfi_row, col=1)
         fig.add_trace(MFI10, row=mfi_row, col=1)
-        # 추세 추종
-        if params['trend_following']:
-            for i in range(len(df['Close'])):
-                if df['PB'][i] > 0.8 and df['MFI10'][i] > 80:
-                    trend_fol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='orange', marker_size=20,
-                                           marker_symbol='triangle-up', opacity=0.7, showlegend=False)
-                    fig.add_trace(trend_fol, row=1, col=1)
-                elif df['PB'][i] < 0.2 and df['MFI10'][i] < 20:
-                    trend_fol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='darkblue', marker_size=20,
-                                           marker_symbol='triangle-down', opacity=0.7, showlegend=False)
-                    fig.add_trace(trend_fol, row=1, col=1)
-        # 역추세 추종
-        if params['i_trend_following']:
-            df['II'] = (2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low']) * df['Volume']
-            df['IIP21'] = df['II'].rolling(window=21).sum() / df['Volume'].rolling(window=21).sum() * 100
-            for i in range(len(df['Close'])):
-                if df['PB'][i] < 0.05 and df['IIP21'][i] > 0:
-                    trend_refol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='purple',
-                                             marker_size=20,
-                                             marker_symbol='triangle-up', opacity=0.7, showlegend=False)  # 보라
-                    fig.add_trace(trend_refol, row=1, col=1)
-                elif df['PB'][i] > 0.95 and df['IIP21'][i] < 0:
-                    trend_refol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='skyblue',
-                                             marker_size=20,
-                                             marker_symbol='triangle-down', opacity=0.7, showlegend=False)  # 하늘
-                    fig.add_trace(trend_refol, row=1, col=1)
 
-
+    # RSI
     if params['rsi']:
         fig.add_trace(RSI, row=rsi_row, col=1)
+    # 추세 추종
+    if params['trend_following']:
+        for i in range(len(df['Close'])):
+            if df['PB'][i] > 0.8 and df['MFI10'][i] > 80:
+                trend_fol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='orange',
+                                       marker_size=15, marker_symbol='triangle-up', opacity=0.7, showlegend=False)
+                fig.add_trace(trend_fol, row=1, col=1)
+            elif df['PB'][i] < 0.2 and df['MFI10'][i] < 20:
+                trend_fol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='darkblue',
+                                       marker_size=15, marker_symbol='triangle-down', opacity=0.7, showlegend=False)
+                fig.add_trace(trend_fol, row=1, col=1)
+    # 역추세 추종
+    if params['r_trend_following']:
+        df['II'] = (2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low']) * df['Volume']
+        df['IIP21'] = df['II'].rolling(window=21).sum() / df['Volume'].rolling(window=21).sum() * 100
+        for i in range(len(df['Close'])):
+            if df['PB'][i] < 0.05 and df['IIP21'][i] > 0:
+                trend_refol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='purple',
+                                         marker_size=15,
+                                         marker_symbol='triangle-up', opacity=0.7, showlegend=False)  # 보라
+                fig.add_trace(trend_refol, row=1, col=1)
+            elif df['PB'][i] > 0.95 and df['IIP21'][i] < 0:
+                trend_refol = go.Scatter(x=[df.index[i]], y=[df['Close'][i]], marker_color='skyblue',
+                                         marker_size=15,
+                                         marker_symbol='triangle-down', opacity=0.7, showlegend=False)  # 하늘
+                fig.add_trace(trend_refol, row=1, col=1)
 
     fig.update_layout(
-        autosize=True,title=params['title'],
+        width=params['width'],
+        height=params['height'],
+        title=params['title'],
         xaxis1_rangeslider_visible=False,
-        xaxis2_rangeslider_visible=False,
         margin=dict(l=50, r=50, t=50, b=50), template='seaborn'
     )
 
-    fig.update_xaxes(tickformat='%y년%m월%d일', zeroline=True, zerolinewidth=1, zerolinecolor='black', showgrid=True,
-                     gridwidth=2, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
-    fig.update_yaxes(tickformat=',d', zeroline=True, zerolinewidth=1, zerolinecolor='black', showgrid=True, gridwidth=2,
-                     gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
-    fig.update_traces(xhoverformat='%y년%m월%d일')
-
     fig.show(config=dict({'scrollZoom': True}))
 
-    if 'save' in kwargs:
+
+    if params['save']:
         home_path = os.path.expanduser('~')
         if not os.path.exists(home_path + "/figures"):
             os.mkdir(home_path + "/figures")
-        fig.write_image(home_path + "/figures/" + "fig_" + params['title'])
+        pio.write_image(fig, home_path + "/figures/" + "fig_" + params['title'], format='png')
