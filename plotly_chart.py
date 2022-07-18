@@ -21,7 +21,7 @@ __fact_def_params = {  # factory default params
     'ylabel': '',
     'moving_average_type': 'SMA',  # 'SMA', 'WMA', 'EMA'
     'moving_average_lines': (5, 20, 60),
-    'save':False
+    'save': False
 }
 
 color_dict = {0: '#FF7F50', 1: '#8FBC8F', 2: '#708090', 3: '#DDA0DD', 4: '#6A5ACD'}
@@ -77,6 +77,7 @@ def plot(df, start=None, end=None, **kwargs):
             params[key] = value
 
     df = df.loc[start:end].copy()
+    subplot_titles = ['OHLC']
 
     candle = go.Candlestick(
         x=df.index,
@@ -86,12 +87,14 @@ def plot(df, start=None, end=None, **kwargs):
         close=df['Close'],
         increasing_line_color='red',  # 상승봉 스타일링
         decreasing_line_color='blue',  # 하락봉 스타일링
+        increasing_fillcolor='red',  # 하락봉 스타일링
+        decreasing_fillcolor='blue',  # 하락봉 스타일링
     )
 
     ma_type = params['moving_average_type']
     weights = np.arange(240) + 1
     # 이동평균선 기본값 20 입력
-    params['moving_average_lines'].insert(0,20)
+    params['moving_average_lines'].insert(0, 20)
     moving_average_lines = []
     for value in params['moving_average_lines']:
         if value not in moving_average_lines:
@@ -141,6 +144,7 @@ def plot(df, start=None, end=None, **kwargs):
     # 보조 지표 옵션
     # 거래량
     if params['volume']:
+        subplot_titles.append("Volume")
         volume_bar = go.Bar(x=df.index, y=df['Volume'], showlegend=False,
                             marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
     # 볼린저 밴드
@@ -151,14 +155,17 @@ def plot(df, start=None, end=None, **kwargs):
             df[f'lower_{n}'] = df[f'MA_{n}'] - 2 * df[f'stddev_{n}']  # 하단밴드
 
             globals()['upper_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'upper_{n}'],
-                                                         line=dict(color=color_dict[ix], width=1, dash='dot'), name=f'upper_{n}',
+                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
+                                                         name=f'upper_{n}',
                                                          showlegend=True)
             globals()['lower_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'lower_{n}'],
-                                                         line=dict(color=color_dict[ix], width=1, dash='dot' ), name=f'lower_{n}',
+                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
+                                                         name=f'lower_{n}',
                                                          showlegend=True)
 
     # MACD
     if params['macd']:
+        subplot_titles.append("MACD")
         nor += 1
         macd_row = row_criteria + nor
         df['ma12'] = df['Close'].rolling(window=12).mean()  # 12일 이동평균
@@ -174,6 +181,7 @@ def plot(df, start=None, end=None, **kwargs):
 
     # 스토캐스틱
     if params['stochastic']:
+        subplot_titles.append("Stochastic")
         nor += 1
         stochastic_row = row_criteria + nor
         df['ndays_high'] = df['High'].rolling(window=14, min_periods=1).max()  # 14일 중 최고가
@@ -187,6 +195,7 @@ def plot(df, start=None, end=None, **kwargs):
 
     # MFI
     if params['mfi']:
+        subplot_titles.append("MFI")
         nor += 1
         mfi_row = row_criteria + nor
         PB = go.Scatter(x=df.index, y=df['PB'] * 100, line=dict(color='blue', width=2), name='PB', legendgroup='group4',
@@ -195,6 +204,7 @@ def plot(df, start=None, end=None, **kwargs):
 
     # RSI
     if params['rsi']:
+        subplot_titles.append("RSI")
         nor += 1
         rsi_row = row_criteria + nor
         U = np.where(df['Close'].diff(1) > 0, df['Close'].diff(1), 0)
@@ -206,30 +216,39 @@ def plot(df, start=None, end=None, **kwargs):
         RSI = go.Scatter(x=df.index, y=df['RSI'], line=dict(color='red', width=2), name='RSI', legendgroup='group5',
                          legendgrouptitle_text='RSI')
 
-    df = df[25:]
-
     row_heights = [3 for i in range(row_criteria + nor)]
     row_heights[0] = 7
 
-    fig = ms.make_subplots(rows= row_criteria + nor, cols=1, shared_xaxes=True, vertical_spacing=0.02,
-                                row_heights=row_heights)
+    fig = ms.make_subplots(rows=row_criteria + nor, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+                           row_heights=row_heights, subplot_titles=subplot_titles)
     fig.update_layout(
         width=params['width'],
-        height= params['height'],
+        height=params['height'],
         title=params['title'],
         xaxis_rangeslider_visible=False,
         margin=dict(l=50, r=50, t=50, b=50),
-        plot_bgcolor = 'white'
+        plot_bgcolor='white',
+        template="plotly_white"
     )
-    fig.update_xaxes(tickformat='%y-%m-%d', zeroline=True, zerolinewidth=1, zerolinecolor='black', showgrid=True,
-                          gridwidth=1, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black',
-                          mirror=True)
-    fig.update_yaxes(title = params['ylabel'], tickformat=',d', zeroline=True, zerolinewidth=1, zerolinecolor='black', showgrid=True,
-                          gridwidth=1,
-                          gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
+    fig.update_xaxes(tickformat='%y-%m-%d', zeroline=True, zerolinewidth=1, zerolinecolor='black',
+                     showgrid=True, gridwidth=1, gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', ticks="outside",
+                     minor=dict(dtick="D1", showgrid=True, ticks="outside"),
+                     # Hide no trading days
+                     rangebreaks=[
+                         dict(values=pd.date_range(df.index[1], df.index[-1]).difference(df.index))
+                     ])
+
+    fig.update_yaxes(title=params['ylabel'], tickformat=',d', zeroline=True, zerolinewidth=1, zerolinecolor='black',
+                     ticks="outside",
+                     minor_ticks="outside",
+                     showgrid=True,
+                     gridwidth=1,
+                     gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
     fig.update_traces(xhoverformat='%y년%m월%d일')
 
     fig.add_trace(candle, row=1, col=1)
+
+
     for n in moving_average_lines:
         fig.add_trace(globals()['ma_{}'.format(n)], row=1, col=1)
 
@@ -253,6 +272,7 @@ def plot(df, start=None, end=None, **kwargs):
     # RSI
     if params['rsi']:
         fig.add_trace(RSI, row=rsi_row, col=1)
+
     # 추세 추종
     if params['trend_following']:
         for i in range(len(df['Close'])):
@@ -280,19 +300,11 @@ def plot(df, start=None, end=None, **kwargs):
                                          marker_symbol='triangle-down', opacity=0.7, showlegend=False)  # 하늘
                 fig.add_trace(trend_refol, row=1, col=1)
 
-    fig.update_layout(
-        width=params['width'],
-        height=params['height'],
-        title=params['title'],
-        xaxis1_rangeslider_visible=False,
-        margin=dict(l=50, r=50, t=50, b=50), template='seaborn'
-    )
-
     fig.show(config=dict({'scrollZoom': True}))
-
 
     if params['save']:
         home_path = os.path.expanduser('~')
         if not os.path.exists(home_path + "/figures"):
             os.mkdir(home_path + "/figures")
-        pio.write_image(fig, home_path + "/figures/" + "fig_" + params['title'], format='png')
+        pio.write_image(fig, home_path + "/figures/" + "fig_" + params['title'] + ".png", format='png')
+        fig.write_html(home_path + "/figures/" + "fig_" + params['title'] + '.html')
