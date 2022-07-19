@@ -3,6 +3,8 @@
 # chart_utils.py
 # (c) 2018,2021 FinaceData.KR
 import os
+from datetime import timedelta
+
 import numpy as np
 import pandas as pd
 
@@ -79,18 +81,6 @@ def plot(df, start=None, end=None, **kwargs):
     df = df.loc[start:end].copy()
     subplot_titles = ['OHLC']
 
-    candle = go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        increasing_line_color='red',  # 상승봉 스타일링
-        decreasing_line_color='blue',  # 하락봉 스타일링
-        increasing_fillcolor='red',  # 하락봉 스타일링
-        decreasing_fillcolor='blue',  # 하락봉 스타일링
-    )
-
     ma_type = params['moving_average_type']
     weights = np.arange(240) + 1
     # 이동평균선 기본값 20 입력
@@ -113,7 +103,7 @@ def plot(df, start=None, end=None, **kwargs):
         else:
             raise ValueError(f"moving_average_type '{ma_type}' is invalid")
 
-    df['ma_default'] = df['Close'].rolling(window=20).mean()  # 20일 이동평균
+    df['ma_default'] = df['Close'].rolling(window=20).mean()  # default 20일(단기) 이동평균
     df['stddev_default'] = df['Close'].rolling(window=20).std()  # 20일 이동표준편차
     df['upper_default'] = df['ma_default'] + 2 * df['stddev_default']  # 상단밴드
     df['lower_default'] = df['ma_default'] - 2 * df['stddev_default']  # 하단밴드
@@ -133,10 +123,6 @@ def plot(df, start=None, end=None, **kwargs):
                  df.NMF.rolling(window=10).sum())
     df['MFI10'] = 100 - 100 / (1 + df['MFR'])
 
-    for ix, n in enumerate(moving_average_lines):
-        globals()['ma_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'MA_{n}'], line=dict(color=color_dict[ix], width=1),
-                                                  name=f'ma_{n}', showlegend=False)
-
     # number of row
     row_criteria = (2 if params['volume'] else 1)
     nor = 0;
@@ -145,23 +131,13 @@ def plot(df, start=None, end=None, **kwargs):
     # 거래량
     if params['volume']:
         subplot_titles.append("Volume")
-        volume_bar = go.Bar(x=df.index, y=df['Volume'], showlegend=False,
-                            marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
+
     # 볼린저 밴드
     if params['bollinger']:
-        for ix, n in enumerate(moving_average_lines):
+        for n in moving_average_lines:
             df[f'stddev_{n}'] = df['Close'].rolling(window=20).std()  # n일 이동표준편차
             df[f'upper_{n}'] = df[f'MA_{n}'] + 2 * df[f'stddev_{n}']  # 상단밴드
             df[f'lower_{n}'] = df[f'MA_{n}'] - 2 * df[f'stddev_{n}']  # 하단밴드
-
-            globals()['upper_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'upper_{n}'],
-                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
-                                                         name=f'upper_{n}',
-                                                         showlegend=True)
-            globals()['lower_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'lower_{n}'],
-                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
-                                                         name=f'lower_{n}',
-                                                         showlegend=True)
 
     # MACD
     if params['macd']:
@@ -173,11 +149,6 @@ def plot(df, start=None, end=None, **kwargs):
         df['MACD'] = df['ma12'] - df['ma26']  # MACD
         df['MACD_Signal'] = df['MACD'].rolling(window=9).mean()  # MACD Signal(MACD 9일 이동평균)
         df['MACD_Oscil'] = df['MACD'] - df['MACD_Signal']  # MACD 오실레이터
-        MACD = go.Scatter(x=df.index, y=df['MACD'], line=dict(color='blue', width=2), name='MACD', legendgroup='group2',
-                          legendgrouptitle_text='MACD')
-        MACD_Signal = go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(dash='dashdot', color='green', width=2),
-                                 name='MACD_Signal')
-        MACD_Oscil = go.Bar(x=df.index, y=df['MACD_Oscil'], marker_color='purple', name='MACD_Oscil')
 
     # 스토캐스틱
     if params['stochastic']:
@@ -188,19 +159,12 @@ def plot(df, start=None, end=None, **kwargs):
         df['ndays_low'] = df['Low'].rolling(window=14, min_periods=1).min()  # 14일 중 최저가
         df['fast_k'] = (df['Close'] - df['ndays_low']) / (df['ndays_high'] - df['ndays_low']) * 100  # Fast %K 구하기
         df['slow_d'] = df['fast_k'].rolling(window=3).mean()  # Slow %D 구하기
-        fast_k = go.Scatter(x=df.index, y=df['fast_k'], line=dict(color='skyblue', width=2), name='fast_k',
-                            legendgroup='group3', legendgrouptitle_text='%K %D')
-        slow_d = go.Scatter(x=df.index, y=df['slow_d'], line=dict(dash='dashdot', color='black', width=2),
-                            name='slow_d')
 
     # MFI
     if params['mfi']:
         subplot_titles.append("MFI")
         nor += 1
         mfi_row = row_criteria + nor
-        PB = go.Scatter(x=df.index, y=df['PB'] * 100, line=dict(color='blue', width=2), name='PB', legendgroup='group4',
-                        legendgrouptitle_text='PB, MFI')
-        MFI10 = go.Scatter(x=df.index, y=df['MFI10'], line=dict(dash='dashdot', color='green', width=2), name='MFI10')
 
     # RSI
     if params['rsi']:
@@ -213,8 +177,8 @@ def plot(df, start=None, end=None, **kwargs):
         AD = pd.DataFrame(D, index=df.index).rolling(window=14).mean()
         RSI = AU / (AD + AU) * 100
         df['RSI'] = RSI
-        RSI = go.Scatter(x=df.index, y=df['RSI'], line=dict(color='red', width=2), name='RSI', legendgroup='group5',
-                         legendgrouptitle_text='RSI')
+
+    df = df[(pd.to_datetime(df.index[0]) + timedelta(days=180) <= df.index)]
 
     row_heights = [3 for i in range(row_criteria + nor)]
     row_heights[0] = 7
@@ -246,31 +210,66 @@ def plot(df, start=None, end=None, **kwargs):
                      gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
     fig.update_traces(xhoverformat='%y년%m월%d일')
 
+    candle = go.Candlestick(
+        x=df.index,
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        increasing_line_color='red',  # 상승봉 스타일링
+        decreasing_line_color='blue',  # 하락봉 스타일링
+        increasing_fillcolor='red',  # 하락봉 스타일링
+        decreasing_fillcolor='blue',  # 하락봉 스타일링
+    )
     fig.add_trace(candle, row=1, col=1)
 
-
-    for n in moving_average_lines:
+    for ix, n in enumerate(moving_average_lines):
+        globals()['ma_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'MA_{n}'], line=dict(color=color_dict[ix], width=1), name=f'ma_{n}', showlegend=False)
         fig.add_trace(globals()['ma_{}'.format(n)], row=1, col=1)
 
     if params['volume']:
+        volume_bar = go.Bar(x=df.index, y=df['Volume'], showlegend=False, marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
         fig.add_trace(volume_bar, row=2, col=1)
     if params['bollinger']:
-        for n in moving_average_lines:
+        for ix, n in enumerate(moving_average_lines):
+            globals()['upper_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'upper_{n}'],
+                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
+                                                         name=f'upper_{n}',
+                                                         showlegend=True)
+            globals()['lower_{}'.format(n)] = go.Scatter(x=df.index, y=df[f'lower_{n}'],
+                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
+                                                         name=f'lower_{n}',
+                                                         showlegend=True)
             fig.add_trace(globals()['upper_{}'.format(n)], row=1, col=1)
             fig.add_trace(globals()['lower_{}'.format(n)], row=1, col=1)
+
     if params['macd']:
+        MACD = go.Scatter(x=df.index, y=df['MACD'], line=dict(color='blue', width=2), name='MACD', legendgroup='group2',
+                          legendgrouptitle_text='MACD')
+        MACD_Signal = go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(dash='dashdot', color='green', width=2),
+                                 name='MACD_Signal')
+        MACD_Oscil = go.Bar(x=df.index, y=df['MACD_Oscil'], marker_color='purple', name='MACD_Oscil')
         fig.add_trace(MACD, row=macd_row, col=1)
         fig.add_trace(MACD_Signal, row=macd_row, col=1)
         fig.add_trace(MACD_Oscil, row=macd_row, col=1)
     if params['stochastic']:
+        fast_k = go.Scatter(x=df.index, y=df['fast_k'], line=dict(color='skyblue', width=2), name='fast_k',
+                            legendgroup='group3', legendgrouptitle_text='%K %D')
+        slow_d = go.Scatter(x=df.index, y=df['slow_d'], line=dict(dash='dashdot', color='black', width=2),
+                            name='slow_d')
         fig.add_trace(fast_k, row=stochastic_row, col=1)
         fig.add_trace(slow_d, row=stochastic_row, col=1)
     if params['mfi']:
+        PB = go.Scatter(x=df.index, y=df['PB'] * 100, line=dict(color='blue', width=2), name='PB', legendgroup='group4',
+                        legendgrouptitle_text='PB, MFI')
+        MFI10 = go.Scatter(x=df.index, y=df['MFI10'], line=dict(dash='dashdot', color='green', width=2), name='MFI10')
         fig.add_trace(PB, row=mfi_row, col=1)
         fig.add_trace(MFI10, row=mfi_row, col=1)
 
     # RSI
     if params['rsi']:
+        RSI = go.Scatter(x=df.index, y=df['RSI'], line=dict(color='red', width=2), name='RSI', legendgroup='group5',
+                         legendgrouptitle_text='RSI')
         fig.add_trace(RSI, row=rsi_row, col=1)
 
     # 추세 추종

@@ -11,9 +11,10 @@ from FinanceDataReader._utils import (_convert_letter_to_num, _validate_dates)
 
 import re
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 
-def DataReader(symbol, start=None, end=None, exchange=None, data_source=None):
+def DataReader(symbol, start=None, end=None, exchange=None, data_source=None, for_chart=False):
     '''
     read price data from various exchanges or data source
     * symbol: code or ticker
@@ -22,6 +23,9 @@ def DataReader(symbol, start=None, end=None, exchange=None, data_source=None):
     * data_source: 'FRED' 
     '''
     start, end = _validate_dates(start, end)
+
+    if for_chart:
+        start = start - timedelta(days = 180)
     
     # FRED Reader
     if data_source and data_source.upper() == 'FRED':
