@@ -29,26 +29,31 @@ def DataReader(symbol, start=None, end=None, exchange=None, data_source=None, fo
     
     # FRED Reader
     if data_source and data_source.upper() == 'FRED':
-        return FredReader(symbol, start, end, exchange, data_source).read()
+        df = FredReader(symbol, start, end, exchange, data_source).read()
 
     # KRX and Naver Finance
     if (symbol[:5].isdigit() and exchange==None) or \
        (symbol[:5].isdigit() and exchange and exchange.upper() in ['KRX', '한국거래소']):
-        return NaverDailyReader(symbol, start, end, exchange, data_source).read()
+        df =  NaverDailyReader(symbol, start, end, exchange, data_source).read()
 
     # KRX-DELISTING
     if (symbol[:5].isdigit() and exchange and exchange.upper() in ['KRX-DELISTING']):
-        return KrxDelistingReader(symbol, start, end, exchange, data_source).read()
+        df = KrxDelistingReader(symbol, start, end, exchange, data_source).read()
 
     # Investing
-    reader = InvestingDailyReader
-    df = reader(symbol, start, end, exchange, data_source).read()
-    end = min([pd.to_datetime(end), datetime.today()])
-    while len(df) and df.index[-1] < end: # issues/30
-        more = reader(symbol, df.index[-1] + timedelta(1), end, exchange, data_source).read()
-        if len(more) == 0:
-            break
-        df = df.append(more)
+    else:
+        reader = InvestingDailyReader
+        df = reader(symbol, start, end, exchange, data_source).read()
+        end = min([pd.to_datetime(end), datetime.today()])
+        while len(df) and df.index[-1] < end: # issues/30
+            more = reader(symbol, df.index[-1] + timedelta(1), end, exchange, data_source).read()
+            if len(more) == 0:
+                break
+            df = df.append(more)
+
+    if start not in df.index:
+        fr = pd.DataFrame([pd.Series(name=start, dtype='object')], columns=df.columns.tolist())
+        df = pd.concat([fr, df])
     return df
 
 def StockListing(market):

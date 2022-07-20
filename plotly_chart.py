@@ -1,4 +1,5 @@
 import os
+import math
 import numpy as np
 import pandas as pd
 from datetime import timedelta
@@ -73,8 +74,6 @@ def plot(df, start=None, end=None, **kwargs):
                 params[key] = value
         else:
             params[key] = value
-
-    df = df.loc[start:end].copy()
 
     전일비_등락 = df["Close"].pct_change()
     시종가_비율 = (df["Close"] - df["Open"]) / df["Open"]
@@ -175,6 +174,7 @@ def plot(df, start=None, end=None, **kwargs):
         RSI = AU / (AD + AU) * 100
         df['RSI'] = RSI
 
+    # 180일 이전 데이터 삭제 및 소수점 3자리 이하 제거
     df = df[(pd.to_datetime(df.index[0]) + timedelta(days=180) <= df.index)].round(3)
 
     row_heights = [3 for i in range(nr)]
@@ -209,7 +209,7 @@ def plot(df, start=None, end=None, **kwargs):
                      minor=dict(dtick="D1", showgrid=True, ticks="outside"),
                      # x축 비영업일 제외
                      rangebreaks=[
-                         dict(values=pd.date_range(df.index[1], df.index[-1]).difference(df.index))
+                         dict(values=pd.date_range(df.index[0], df.index[-1]).difference(df.index))
                      ])
 
     fig.update_yaxes(tickformat=',', zeroline=True, zerolinewidth=1, zerolinecolor='black',
