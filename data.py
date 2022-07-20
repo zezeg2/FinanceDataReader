@@ -23,6 +23,7 @@ def DataReader(symbol, start=None, end=None, exchange=None, data_source=None, fo
     * data_source: 'FRED' 
     '''
     start, end = _validate_dates(start, end)
+    df = None
 
     if for_chart:
         start = start - timedelta(days = 180)
@@ -34,14 +35,14 @@ def DataReader(symbol, start=None, end=None, exchange=None, data_source=None, fo
     # KRX and Naver Finance
     if (symbol[:5].isdigit() and exchange==None) or \
        (symbol[:5].isdigit() and exchange and exchange.upper() in ['KRX', '한국거래소']):
-        df =  NaverDailyReader(symbol, start, end, exchange, data_source).read()
+        df = NaverDailyReader(symbol, start, end, exchange, data_source).read()
 
     # KRX-DELISTING
     if (symbol[:5].isdigit() and exchange and exchange.upper() in ['KRX-DELISTING']):
         df = KrxDelistingReader(symbol, start, end, exchange, data_source).read()
 
     # Investing
-    else:
+    if df is None:
         reader = InvestingDailyReader
         df = reader(symbol, start, end, exchange, data_source).read()
         end = min([pd.to_datetime(end), datetime.today()])
@@ -51,7 +52,7 @@ def DataReader(symbol, start=None, end=None, exchange=None, data_source=None, fo
                 break
             df = df.append(more)
 
-    if start not in df.index:
+    if (start not in df.index) & for_chart:
         fr = pd.DataFrame([pd.Series(name=start, dtype='object')], columns=df.columns.tolist())
         df = pd.concat([fr, df])
     return df

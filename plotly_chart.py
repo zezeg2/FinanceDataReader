@@ -17,7 +17,7 @@ __fact_def_params = {  # factory default params
     'r_trend_following': False,
     'title': '',
     'moving_average_type': 'SMA',  # 'SMA', 'WMA', 'EMA'
-    'moving_average_lines': (5,20,60),
+    'moving_average_lines': (5, 20, 60),
     'save': False
 }
 
@@ -82,8 +82,6 @@ def plot(df, start=None, end=None, **kwargs):
     ma_type = params['moving_average_type']
     weights = np.arange(240) + 1
 
-
-
     for n in params['moving_average_lines']:  # moving average lines
         if ma_type.upper() == 'SMA':
             df[f'MA_{n}'] = df.Close.rolling(window=n).mean()
@@ -124,7 +122,7 @@ def plot(df, start=None, end=None, **kwargs):
     # 보조 지표 옵션
     # 거래량
     if params['volume']:
-        nr +=1
+        nr += 1
         volume_row = nr
         subplot_titles.append("Volume")
 
@@ -235,16 +233,9 @@ def plot(df, start=None, end=None, **kwargs):
                             showlegend=True,
                             legendgroup='group1',
                             legendgrouptitle_text='Price Chart',
-                            text = [f'전일대비: {chg:.1%} 시종: {oc:.1%}, 시고: {oh:.1%}' for chg, oc, oh in zip(전일비_등락, 시종가_비율, 시고가_비율)])
+                            text=[f'전일대비: {chg:.1%} 시종: {oc:.1%}, 시고: {oh:.1%}' for chg, oc, oh in
+                                  zip(전일비_등락, 시종가_비율, 시고가_비율)])
     fig.add_trace(candle, row=1, col=1)
-
-    if params['volume']:
-        volume_bar = go.Bar(name="Volume",
-                            x=df.index,
-                            y=df['Volume'],
-                            showlegend=False,
-                            marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
-        fig.add_trace(volume_bar, row=volume_row, col=1)
 
     for ix, n in enumerate(params['moving_average_lines']):
         globals()['ma_{}'.format(n)] = go.Scatter(name=f'ma_{n}',
@@ -253,6 +244,14 @@ def plot(df, start=None, end=None, **kwargs):
                                                   line=dict(color=color_dict[ix], width=1),
                                                   showlegend=False)
         fig.add_trace(globals()['ma_{}'.format(n)], row=1, col=1)
+
+    if params['volume']:
+        volume_bar = go.Bar(name="Volume",
+                            x=df.index,
+                            y=df['Volume'],
+                            showlegend=False,
+                            marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
+        fig.add_trace(volume_bar, row=volume_row, col=1)
 
     if params['bollinger']:
         for ix, n in enumerate(params['moving_average_lines']):
