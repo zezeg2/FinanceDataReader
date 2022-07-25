@@ -58,7 +58,7 @@ def config(**kwargs):
             __plot_params[key] = value
 
 
-def plot(df : pd.DataFrame, start=None, end=None, **kwargs):
+def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
     """
     plot candle chart with 'df'(DataFrame) from 'start' to 'end'
     * df: DataFrame to plot
@@ -74,6 +74,16 @@ def plot(df : pd.DataFrame, start=None, end=None, **kwargs):
                 params[k] = v
         else:
             params[key] = value
+
+    if 'Volume' not in df.columns:
+        params['volume'] = False
+        params['bollinger'] = False
+        params['macd'] = False
+        params['stochastic'] = False
+        params['mfi'] = False
+        params['rsi'] = False
+        params['trend_following'] = False
+        params['r_trend_following'] = False
 
     df = df.loc[start:end].copy()
 
@@ -107,15 +117,18 @@ def plot(df : pd.DataFrame, start=None, end=None, **kwargs):
     df['PMF'] = 0
     df['NMF'] = 0
 
-    for i in range(len(df.Close) - 1):
-        if df.TP.values[i] < df.TP.values[i + 1]:
-            df.PMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
-            df.NMF.values[i + 1] = 0
-        else:
-            df.NMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
-            df.PMF.values[i + 1] = 0
-    df['MFR'] = (df.PMF.rolling(window=10).sum() / df.NMF.rolling(window=10).sum())
-    df['MFI10'] = 100 - 100 / (1 + df['MFR'])
+    try:
+        for i in range(len(df.Close) - 1):
+            if df.TP.values[i] < df.TP.values[i + 1]:
+                df.PMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
+                df.NMF.values[i + 1] = 0
+            else:
+                df.NMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
+                df.PMF.values[i + 1] = 0
+        df['MFR'] = (df.PMF.rolling(window=10).sum() / df.NMF.rolling(window=10).sum())
+        df['MFI10'] = 100 - 100 / (1 + df['MFR'])
+    except:
+        pass
 
     # number of row
     nr = 1;
@@ -388,7 +401,8 @@ def plot(df : pd.DataFrame, start=None, end=None, **kwargs):
 
     return fig
 
-def readAndPlot(symbol : str, start=None, end=None, exchange=None, **kwargs):
+
+def readAndPlot(symbol: str, start=None, end=None, exchange=None, **kwargs):
     from FinanceDataReader.data import DataReader
     df = DataReader(symbol, start, end, exchange, for_chart=True)
-    return plot(df, config = kwargs)
+    return plot(df, config=kwargs)
