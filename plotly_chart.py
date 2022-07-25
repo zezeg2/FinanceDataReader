@@ -58,7 +58,7 @@ def config(**kwargs):
             __plot_params[key] = value
 
 
-def plot(df, start=None, end=None, **kwargs):
+def plot(df : pd.DataFrame, start=None, end=None, **kwargs):
     """
     plot candle chart with 'df'(DataFrame) from 'start' to 'end'
     * df: DataFrame to plot
@@ -70,10 +70,12 @@ def plot(df, start=None, end=None, **kwargs):
     params = dict(__plot_params)
     for key, value in kwargs.items():
         if key == 'config':
-            for key, value in kwargs.items():
-                params[key] = value
+            for k, v in value.items():
+                params[k] = v
         else:
             params[key] = value
+
+    df = df.loc[start:end].copy()
 
     전일비_등락 = df["Close"].pct_change()
     시종가_비율 = (df["Close"] - df["Open"]) / df["Open"]
@@ -385,3 +387,8 @@ def plot(df, start=None, end=None, **kwargs):
         fig.write_html(home_path + "/figures/" + "fig_" + params['title'] + '.html')
 
     return fig
+
+def readAndPlot(symbol : str, start=None, end=None, exchange=None, **kwargs):
+    from FinanceDataReader.data import DataReader
+    df = DataReader(symbol, start, end, exchange, for_chart=True)
+    return plot(df, config = kwargs)
