@@ -83,7 +83,7 @@ def plot(df: pd.DataFrame, start=None, end=None, tools={}, sub_indexes={}, **kwa
     default_moving_averages = [5, 20, 60]
     default_ma_type = 'SMA'
     ma_list = sub_indexes.pop('moving_averages') if 'moving_averages' in sub_indexes else default_moving_averages
-    moving_average_lines=[];
+    moving_average_lines = [];
     for i, ma in enumerate(ma_list):
         if type(ma) == int:
             window = ma
@@ -142,7 +142,6 @@ def plot(df: pd.DataFrame, start=None, end=None, tools={}, sub_indexes={}, **kwa
                 df[f'stddev_{n}'] = df['Close'].rolling(window=20).std()  # n일 이동표준편차
                 df[f'upper_{n}'] = df[f'MA_{n}'] + 2 * df[f'stddev_{n}']  # 상단밴드
                 df[f'lower_{n}'] = df[f'MA_{n}'] - 2 * df[f'stddev_{n}']  # 하단밴드
-
 
         # MACD
         if index == 'macd':
@@ -267,73 +266,136 @@ def plot(df: pd.DataFrame, start=None, end=None, tools={}, sub_indexes={}, **kwa
             fig.add_trace(go.Scatter(**ma_args, line_dash='dot', y=df[f'upper_{window}']), row=1, col=1)
             fig.add_trace(go.Scatter(**ma_args, line_dash='dot', y=df[f'lower_{window}']), row=1, col=1)
 
-    if sub_indexes.get('volume'):
-        marker_color = list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)) if not params[
-            'us_style'] else list(map(lambda x: "green" if x else "red", df.Volume.diff() >= 0))
-        volume_bar = go.Bar(name="Volume",
-                            x=df.index,
-                            y=df['Volume'],
-                            showlegend=False,
-                            marker_color=marker_color)
-        fig.add_trace(volume_bar, row=volume_row, col=1)
+    for i, index in enumerate(sub_indexes):
+        if index == 'volume':
+            marker_color = list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)) if not params[
+                'us_style'] else list(map(lambda x: "green" if x else "red", df.Volume.diff() >= 0))
+            volume_bar = go.Bar(name="Volume",
+                                x=df.index,
+                                y=df['Volume'],
+                                showlegend=False,
+                                marker_color=marker_color)
+            fig.add_trace(volume_bar, row=volume_row, col=1)
 
-    if sub_indexes.get('macd'):
-        MACD = go.Scatter(name='MACD',
-                          x=df.index,
-                          y=df['MACD'],
-                          line=dict(color='blue', width=2),
-                          legendgroup=f'group{macd_row}',
-                          legendgrouptitle_text='MACD')
-        MACD_Signal = go.Scatter(name='MACD Signal',
-                                 x=df.index,
-                                 y=df['MACD_Signal'],
-                                 line=dict(dash='dashdot', color='green', width=2))
-        MACD_Oscil = go.Bar(name='MACD Oscil',
-                            x=df.index,
-                            y=df['MACD_Oscil'],
-                            marker_color='purple')
+        if index == 'macd':
+            macd_args = dict(name='MACD',
+                             x=df.index,
+                             y=df['MACD'],
+                             line=dict(color='blue', width=2),
+                             legendgroup=f'group{macd_row}',
+                             legendgrouptitle_text='MACD')
+            signal_args = dict(name='MACD_Signal',
+                               x=df.index,
+                               y=df['MACD_Signal'],
+                               line=dict(dash='dashdot', color='green', width=2))
+            oscillator_args = dict(name='MACD_Oscillator',
+                                   x=df.index,
+                                   y=df['MACD_Oscil'],
+                                   marker_color='purple')
 
-        fig.add_trace(MACD, row=macd_row, col=1)
-        fig.add_trace(MACD_Signal, row=macd_row, col=1)
-        fig.add_trace(MACD_Oscil, row=macd_row, col=1)
+            default_macd_list = ['macd', 'signal', 'oscillator']
+            macd_list = sub_indexes.get('macd') if type(sub_indexes.get('macd')) is list else default_macd_list
+            for content in macd_list:
+                visible = True;
+                name = ''
+                if type(content) is not dict:
+                    if content == 'macd': args = macd_args
+                    if content == 'signal': args = signal_args
+                    if content == 'oscillator':
+                        args = oscillator_args
+                        name = 'oscillator'
+                else:
+                    name = content.pop('name')
+                    if name == 'macd':
+                        macd_args.update(content)
+                        args = macd_args
+                    if name == 'signal':
+                        signal_args.update(content)
+                        args = signal_args
+                    if name == 'oscillator':
+                        oscillator_args.update(content)
+                        args = oscillator_args
+                    if 'visible' in content:
+                        visible = content.get('visible')
+                if visible:
+                    if name == 'oscillator':
+                        fig.add_trace(go.Bar(**args), row=macd_row, col=1)
+                    else:
+                        fig.add_trace(go.Scatter(**args), row=macd_row, col=1)
 
-    if sub_indexes.get('stochastic'):
-        fast_k = go.Scatter(name='fast_k',
-                            x=df.index,
-                            y=df['fast_k'],
-                            line=dict(color='skyblue', width=2),
-                            legendgroup=f'group{stochastic_row}',
-                            legendgrouptitle_text='%K %D')
-        slow_d = go.Scatter(name='slow_d',
-                            x=df.index,
-                            y=df['slow_d'],
-                            line=dict(dash='dashdot', color='black', width=2))
-        fig.add_trace(fast_k, row=stochastic_row, col=1)
-        fig.add_trace(slow_d, row=stochastic_row, col=1)
+        if index == 'stochastic':
+            fast_k_args = dict(name='fast_k',
+                               x=df.index,
+                               y=df['fast_k'],
+                               line=dict(color='skyblue', width=2),
+                               legendgroup=f'group{stochastic_row}',
+                               legendgrouptitle_text='%K %D')
+            slow_d_args = dict(name='slow_d',
+                               x=df.index,
+                               y=df['slow_d'],
+                               line=dict(dash='dashdot', color='black', width=2))
+            default_stochastic_list = ['fast_k', 'slow_d']
+            stochastic_list = sub_indexes.get('stochastic') if type(
+                sub_indexes.get('stochastic')) is list else default_stochastic_list
+            for content in stochastic_list:
+                visible = True
+                if type(content) is not dict:
+                    if content == 'fast_k': args = fast_k_args
+                    if content == 'slow_d': args = slow_d_args
+                else:
+                    name = content.pop('name')
+                    if name == 'fast_k':
+                        fast_k_args.update(content)
+                        args = fast_k_args
+                    if name == 'slow_d':
+                        slow_d_args.update(content)
+                        args = slow_d_args
+                    if 'visible' in content:
+                        visible = content.get('visible')
+                if visible:
+                    fig.add_trace(go.Scatter(**args), row=stochastic_row, col=1)
 
-    if sub_indexes.get('mfi'):
-        PB = go.Scatter(name='PB',
-                        x=df.index,
-                        y=df['PB'] * 100,
-                        line=dict(color='blue', width=2),
-                        legendgroup=f'group{mfi_row}',
-                        legendgrouptitle_text='PB, MFI')
-        MFI10 = go.Scatter(name='MFI10',
+        if index == 'mfi':
+            pb_args = dict(name='PB',
                            x=df.index,
-                           y=df['MFI10'],
-                           line=dict(dash='dashdot', color='green', width=2))
-        fig.add_trace(PB, row=mfi_row, col=1)
-        fig.add_trace(MFI10, row=mfi_row, col=1)
+                           y=df['PB'] * 100,
+                           line=dict(color='blue', width=2),
+                           legendgroup=f'group{mfi_row}',
+                           legendgrouptitle_text='PB, MFI')
+            mfi10_args = dict(name='MFI10',
+                              x=df.index,
+                              y=df['MFI10'],
+                              line=dict(dash='dashdot', color='green', width=2))
+            default_mfi_list = ['pb', 'mfi10']
+            mfi_list = sub_indexes.get('mfi') if type(sub_indexes.get('mfi')) is list else default_mfi_list
+            for content in mfi_list:
+                visible = True
+                if type(content) is not dict:
+                    if content == 'pb': args = pb_args
+                    if content == 'mfi10': args = mfi10_args
+                else:
+                    name = content.pop('name')
+                    if name == 'pb':
+                        pb_args.update(content)
+                        args = pb_args
+                    if name == 'mfi10':
+                        mfi10_args.update(content)
+                        args = mfi10_args
+                    if 'visible' in content:
+                        visible = content.get('visible')
+                if visible:
+                    fig.add_trace(go.Scatter(**args), row=mfi_row, col=1)
 
-    # RSI
-    if sub_indexes.get('rsi'):
-        RSI = go.Scatter(name='RSI',
-                         x=df.index,
-                         y=df['RSI'],
-                         line=dict(color='red', width=2),
-                         legendgroup=f'group{rsi_row}',
-                         legendgrouptitle_text='RSI')
-        fig.add_trace(RSI, row=rsi_row, col=1)
+        if index == 'rsi':
+            rsi_args = dict(name='RSI',
+                            x=df.index,
+                            y=df['RSI'],
+                            line=dict(color='red', width=2),
+                            legendgroup=f'group{rsi_row}',
+                            legendgrouptitle_text='RSI')
+            if type(sub_indexes.get('rsi')) == dict:
+                rsi_args.update(sub_indexes.get('rsi'))
+            fig.add_trace(go.Scatter(**rsi_args), row=rsi_row, col=1)
 
     # 추세 추종
     if sub_indexes.get('trend_following'):
