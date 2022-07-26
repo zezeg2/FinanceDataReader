@@ -1,3 +1,4 @@
+import datetime
 import os
 import math
 import numpy as np
@@ -7,21 +8,12 @@ from datetime import timedelta
 __fact_def_params = {  # factory default params
     'width': 1200,
     'height': 800,
-    'volume': True,
-    'bollinger': False,
-    'macd': False,
-    'stochastic': False,
-    'mfi': False,
-    'rsi': False,
-    'trend_following': False,
-    'r_trend_following': False,
+    'us_style': False,
     'title': '',
-    'moving_average_type': 'SMA',  # 'SMA', 'WMA', 'EMA'
-    'moving_average_lines': (5, 20, 60),
     'save': False
 }
 
-color_dict = {0: '#FF7F50', 1: '#8FBC8F', 2: '#708090', 3: '#DDA0DD', 4: '#6A5ACD'}
+color_list = ['darkmagenta', 'gold', 'limegreen', 'maroon', 'chocolate', 'seagreen', 'coral']
 
 __plot_params = dict(__fact_def_params)
 
@@ -58,7 +50,7 @@ def config(**kwargs):
             __plot_params[key] = value
 
 
-def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
+def plot(df: pd.DataFrame, start=None, end=None, tools={}, sub_indexes={}, **kwargs):
     """
     plot candle chart with 'df'(DataFrame) from 'start' to 'end'
     * df: DataFrame to plot
@@ -75,15 +67,9 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
         else:
             params[key] = value
 
+    sub_indexes = dict(filter(lambda elem: elem[1] != False, sub_indexes.items()))
     if 'Volume' not in df.columns:
-        params['volume'] = False
-        params['bollinger'] = False
-        params['macd'] = False
-        params['stochastic'] = False
-        params['mfi'] = False
-        params['rsi'] = False
-        params['trend_following'] = False
-        params['r_trend_following'] = False
+        sub_indexes = dict(filter(lambda elem: elem[0] == 'moving_averages', sub_indexes.items()))
 
     df = df.loc[start:end].copy()
 
@@ -91,33 +77,44 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
     시종가_비율 = (df["Close"] - df["Open"]) / df["Open"]
     시고가_비율 = (df["High"] - df["Open"]) / df["Open"]
 
-    ma_type = params['moving_average_type']
+    # 이동 평균선
     weights = np.arange(240) + 1
 
-    for n in params['moving_average_lines']:  # moving average lines
-        if ma_type.upper() == 'SMA':
-            df[f'MA_{n}'] = df.Close.rolling(window=n).mean()
+    default_moving_averages = [5, 20, 60]
+    default_ma_type = 'SMA'
+    ma_list = sub_indexes.pop('moving_averages') if 'moving_averages' in sub_indexes else default_moving_averages
+    moving_average_lines=[];
+    for i, ma in enumerate(ma_list):
+        if type(ma) == int:
+            window = ma
+            ma_type = default_ma_type
+        elif type(ma) == dict:
+            window = ma['window']
+            ma_type = ma['type'] if 'type' in ma else default_ma_type
+        moving_average_lines.append(window)
+        if (ma_type.upper() == 'SMA') | (ma_type.upper() == 'NONE'):
+            df[f'MA_{window}'] = df.Close.rolling(window=window).mean()
         elif ma_type.upper() == 'WMA':
-            df[f'MA_{n}'] = df.Close.rolling(n).apply(
+            df[f'MA_{window}'] = df.Close.rolling(window).apply(
                 lambda prices: np.dot(prices, weights[:n]) / weights[:n].sum())
         elif ma_type.upper() == 'EMA':
-            df[f'MA_{n}'] = df.Close.ewm(span=n).mean()
-        elif ma_type.upper() == 'NONE':
-            pass
+            df[f'MA_{window}'] = df.Close.ewm(span=window).mean()
         else:
             raise ValueError(f"moving_average_type '{ma_type}' is invalid")
 
-    df['ma_default'] = df['Close'].rolling(window=20).mean()  # default 20일(단기) 이동평균
+    df['ma_default'] = df['MA_20'] if 'MA_20' in df.columns else df['Close'].rolling(
+        window=20).mean()  # default 20일(단기) 이동평균
     df['stddev_default'] = df['Close'].rolling(window=20).std()  # 20일 이동표준편차
     df['upper_default'] = df['ma_default'] + 2 * df['stddev_default']  # 상단밴드
     df['lower_default'] = df['ma_default'] - 2 * df['stddev_default']  # 하단밴드
 
-    df['PB'] = (df['Close'] - df['lower_default']) / (df['upper_default'] - df['lower_default'])
-    df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
-    df['PMF'] = 0
-    df['NMF'] = 0
+    if ('Volume' in df.columns) & (
+            ('mfi' in sub_indexes) | ('trend_following' in sub_indexes) | ('r_trend_following' in sub_indexes)):
+        df['PB'] = (df['Close'] - df['lower_default']) / (df['upper_default'] - df['lower_default'])
+        df['TP'] = (df['High'] + df['Low'] + df['Close']) / 3
+        df['PMF'] = 0
+        df['NMF'] = 0
 
-    try:
         for i in range(len(df.Close) - 1):
             if df.TP.values[i] < df.TP.values[i + 1]:
                 df.PMF.values[i + 1] = df.TP.values[i + 1] * df.Volume.values[i + 1]
@@ -127,65 +124,64 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
                 df.PMF.values[i + 1] = 0
         df['MFR'] = (df.PMF.rolling(window=10).sum() / df.NMF.rolling(window=10).sum())
         df['MFI10'] = 100 - 100 / (1 + df['MFR'])
-    except:
-        pass
 
     # number of row
     nr = 1;
     subplot_titles = ['OHLC']
 
-    # 보조 지표 옵션
-    # 거래량
-    if params['volume']:
-        nr += 1
-        volume_row = nr
-        subplot_titles.append("Volume")
+    for i, index in enumerate(sub_indexes):
+        # 거래량
+        if index == 'volume':
+            nr += 1
+            volume_row = nr
+            subplot_titles.append("Volume")
 
-    # 볼린저 밴드
-    if params['bollinger']:
-        for n in params['moving_average_lines']:
-            df[f'stddev_{n}'] = df['Close'].rolling(window=20).std()  # n일 이동표준편차
-            df[f'upper_{n}'] = df[f'MA_{n}'] + 2 * df[f'stddev_{n}']  # 상단밴드
-            df[f'lower_{n}'] = df[f'MA_{n}'] - 2 * df[f'stddev_{n}']  # 하단밴드
+        # 볼린저 밴드
+        if index == 'bollinger':
+            for n in moving_average_lines:
+                df[f'stddev_{n}'] = df['Close'].rolling(window=20).std()  # n일 이동표준편차
+                df[f'upper_{n}'] = df[f'MA_{n}'] + 2 * df[f'stddev_{n}']  # 상단밴드
+                df[f'lower_{n}'] = df[f'MA_{n}'] - 2 * df[f'stddev_{n}']  # 하단밴드
 
-    # MACD
-    if params['macd']:
-        subplot_titles.append("MACD")
-        nr += 1
-        macd_row = nr
-        df['ma12'] = df['Close'].rolling(window=12).mean()  # 12일 이동평균
-        df['ma26'] = df['Close'].rolling(window=26).mean()  # 26일 이동평균
-        df['MACD'] = df['ma12'] - df['ma26']  # MACD
-        df['MACD_Signal'] = df['MACD'].rolling(window=9).mean()  # MACD Signal(MACD 9일 이동평균)
-        df['MACD_Oscil'] = df['MACD'] - df['MACD_Signal']  # MACD 오실레이터
 
-    # 스토캐스틱
-    if params['stochastic']:
-        subplot_titles.append("Stochastic")
-        nr += 1
-        stochastic_row = nr
-        df['ndays_high'] = df['High'].rolling(window=14, min_periods=1).max()  # 14일 중 최고가
-        df['ndays_low'] = df['Low'].rolling(window=14, min_periods=1).min()  # 14일 중 최저가
-        df['fast_k'] = (df['Close'] - df['ndays_low']) / (df['ndays_high'] - df['ndays_low']) * 100  # Fast %K 구하기
-        df['slow_d'] = df['fast_k'].rolling(window=3).mean()  # Slow %D 구하기
+        # MACD
+        if index == 'macd':
+            subplot_titles.append("MACD")
+            nr += 1
+            macd_row = nr
+            df['ma12'] = df['Close'].rolling(window=12).mean()  # 12일 이동평균
+            df['ma26'] = df['Close'].rolling(window=26).mean()  # 26일 이동평균
+            df['MACD'] = df['ma12'] - df['ma26']  # MACD
+            df['MACD_Signal'] = df['MACD'].rolling(window=9).mean()  # MACD Signal(MACD 9일 이동평균)
+            df['MACD_Oscil'] = df['MACD'] - df['MACD_Signal']  # MACD 오실레이터
 
-    # MFI
-    if params['mfi']:
-        subplot_titles.append("MFI")
-        nr += 1
-        mfi_row = nr
+        # 스토캐스틱
+        if index == 'stochastic':
+            subplot_titles.append("Stochastic")
+            nr += 1
+            stochastic_row = nr
+            df['ndays_high'] = df['High'].rolling(window=14, min_periods=1).max()  # 14일 중 최고가
+            df['ndays_low'] = df['Low'].rolling(window=14, min_periods=1).min()  # 14일 중 최저가
+            df['fast_k'] = (df['Close'] - df['ndays_low']) / (df['ndays_high'] - df['ndays_low']) * 100  # Fast %K 구하기
+            df['slow_d'] = df['fast_k'].rolling(window=3).mean()  # Slow %D 구하기
 
-    # RSI
-    if params['rsi']:
-        subplot_titles.append("RSI")
-        nr += 1
-        rsi_row = nr
-        U = np.where(df['Close'].diff(1) > 0, df['Close'].diff(1), 0)
-        D = np.where(df['Close'].diff(1) < 0, df['Close'].diff(1) * (-1), 0)
-        AU = pd.DataFrame(U, index=df.index).rolling(window=14).mean()
-        AD = pd.DataFrame(D, index=df.index).rolling(window=14).mean()
-        RSI = AU / (AD + AU) * 100
-        df['RSI'] = RSI
+        # MFI
+        if index == 'mfi':
+            subplot_titles.append("MFI")
+            nr += 1
+            mfi_row = nr
+
+        # RSI
+        if index == 'rsi':
+            subplot_titles.append("RSI")
+            nr += 1
+            rsi_row = nr
+            U = np.where(df['Close'].diff(1) > 0, df['Close'].diff(1), 0)
+            D = np.where(df['Close'].diff(1) < 0, df['Close'].diff(1) * (-1), 0)
+            AU = pd.DataFrame(U, index=df.index).rolling(window=14).mean()
+            AD = pd.DataFrame(D, index=df.index).rolling(window=14).mean()
+            RSI = AU / (AD + AU) * 100
+            df['RSI'] = RSI
 
     # 180일 이전 데이터 삭제 및 소수점 3자리 이하 제거
     df = df[(pd.to_datetime(df.index[0]) + timedelta(days=180) <= df.index)].round(3)
@@ -233,16 +229,18 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
                      gridcolor='lightgray', showline=True, linewidth=2, linecolor='black', mirror=True)
     fig.update_traces(xhoverformat='%y년%m월%d일')
 
+    increase_color = 'red' if not params['us_style'] else 'green'
+    decrease_color = 'blue' if not params['us_style'] else 'red'
     candle = go.Candlestick(name="OHLC",
                             x=df.index,
                             open=df['Open'],
                             high=df['High'],
                             low=df['Low'],
                             close=df['Close'],
-                            increasing_line_color='red',
-                            decreasing_line_color='blue',
-                            increasing_fillcolor='red',
-                            decreasing_fillcolor='blue',
+                            increasing_line_color=increase_color,
+                            decreasing_line_color=decrease_color,
+                            increasing_fillcolor=increase_color,
+                            decreasing_fillcolor=decrease_color,
                             increasing_line_width=1,
                             decreasing_line_width=1,
                             showlegend=True,
@@ -252,43 +250,39 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
                                   zip(전일비_등락, 시종가_비율, 시고가_비율)])
     fig.add_trace(candle, row=1, col=1)
 
-    for ix, n in enumerate(params['moving_average_lines']):
-        globals()['ma_{}'.format(n)] = go.Scatter(name=f'ma_{n}',
-                                                  x=df.index,
-                                                  y=df[f'MA_{n}'],
-                                                  line=dict(color=color_dict[ix], width=1),
-                                                  showlegend=False)
-        fig.add_trace(globals()['ma_{}'.format(n)], row=1, col=1)
+    for i, ma in enumerate(ma_list):
+        def_color = color_list[i % len(color_list)] if i >= len(color_list) else color_list[i]
+        if type(ma) == int:
+            window = ma
+            line_color = def_color
+        elif type(ma) == dict:
+            window = ma['window']
+            line_color = ma['line_color'] if 'line_color' in ma else def_color
+        ma_args = dict()
+        ma_args['name'] = f'ma{window}'
+        ma_args['x'] = df.index
+        ma_args['line'] = dict(color=line_color, width=1 if 'line_width' not in ma else ma['line_width'])
+        fig.add_trace(go.Scatter(**ma_args, y=df[f'MA_{window}']), row=1, col=1)
+        if 'bollinger' in sub_indexes:
+            fig.add_trace(go.Scatter(**ma_args, line_dash='dot', y=df[f'upper_{window}']), row=1, col=1)
+            fig.add_trace(go.Scatter(**ma_args, line_dash='dot', y=df[f'lower_{window}']), row=1, col=1)
 
-    if params['volume']:
+    if sub_indexes.get('volume'):
+        marker_color = list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)) if not params[
+            'us_style'] else list(map(lambda x: "green" if x else "red", df.Volume.diff() >= 0))
         volume_bar = go.Bar(name="Volume",
                             x=df.index,
                             y=df['Volume'],
                             showlegend=False,
-                            marker_color=list(map(lambda x: "red" if x else "blue", df.Volume.diff() >= 0)))
+                            marker_color=marker_color)
         fig.add_trace(volume_bar, row=volume_row, col=1)
 
-    if params['bollinger']:
-        for ix, n in enumerate(params['moving_average_lines']):
-            globals()['upper_{}'.format(n)] = go.Scatter(name=f'upper_{n}',
-                                                         x=df.index,
-                                                         y=df[f'upper_{n}'],
-                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
-                                                         showlegend=True)
-            globals()['lower_{}'.format(n)] = go.Scatter(name=f'lower_{n}',
-                                                         x=df.index,
-                                                         y=df[f'lower_{n}'],
-                                                         line=dict(color=color_dict[ix], width=1, dash='dot'),
-                                                         showlegend=True)
-            fig.add_trace(globals()['upper_{}'.format(n)], row=1, col=1)
-            fig.add_trace(globals()['lower_{}'.format(n)], row=1, col=1)
-
-    if params['macd']:
+    if sub_indexes.get('macd'):
         MACD = go.Scatter(name='MACD',
                           x=df.index,
                           y=df['MACD'],
                           line=dict(color='blue', width=2),
-                          legendgroup='group2',
+                          legendgroup=f'group{macd_row}',
                           legendgrouptitle_text='MACD')
         MACD_Signal = go.Scatter(name='MACD Signal',
                                  x=df.index,
@@ -303,12 +297,12 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
         fig.add_trace(MACD_Signal, row=macd_row, col=1)
         fig.add_trace(MACD_Oscil, row=macd_row, col=1)
 
-    if params['stochastic']:
+    if sub_indexes.get('stochastic'):
         fast_k = go.Scatter(name='fast_k',
                             x=df.index,
                             y=df['fast_k'],
                             line=dict(color='skyblue', width=2),
-                            legendgroup='group3',
+                            legendgroup=f'group{stochastic_row}',
                             legendgrouptitle_text='%K %D')
         slow_d = go.Scatter(name='slow_d',
                             x=df.index,
@@ -317,12 +311,12 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
         fig.add_trace(fast_k, row=stochastic_row, col=1)
         fig.add_trace(slow_d, row=stochastic_row, col=1)
 
-    if params['mfi']:
+    if sub_indexes.get('mfi'):
         PB = go.Scatter(name='PB',
                         x=df.index,
                         y=df['PB'] * 100,
                         line=dict(color='blue', width=2),
-                        legendgroup='group4',
+                        legendgroup=f'group{mfi_row}',
                         legendgrouptitle_text='PB, MFI')
         MFI10 = go.Scatter(name='MFI10',
                            x=df.index,
@@ -332,17 +326,17 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
         fig.add_trace(MFI10, row=mfi_row, col=1)
 
     # RSI
-    if params['rsi']:
+    if sub_indexes.get('rsi'):
         RSI = go.Scatter(name='RSI',
                          x=df.index,
                          y=df['RSI'],
                          line=dict(color='red', width=2),
-                         legendgroup='group5',
+                         legendgroup=f'group{rsi_row}',
                          legendgrouptitle_text='RSI')
         fig.add_trace(RSI, row=rsi_row, col=1)
 
     # 추세 추종
-    if params['trend_following']:
+    if sub_indexes.get('trend_following'):
         for i in range(len(df['Close'])):
             if df['PB'][i] > 0.8 and df['MFI10'][i] > 80:
                 trend_fol = go.Scatter(name="trend_fol_u",
@@ -365,7 +359,7 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
                                        showlegend=False)
                 fig.add_trace(trend_fol, row=1, col=1)
     # 역추세 추종
-    if params['r_trend_following']:
+    if sub_indexes.get('r_trend_following'):
         df['II'] = (2 * df['Close'] - df['High'] - df['Low']) / (df['High'] - df['Low']) * df['Volume']
         df['IIP21'] = df['II'].rolling(window=21).sum() / df['Volume'].rolling(window=21).sum() * 100
         for i in range(len(df['Close'])):
@@ -391,6 +385,31 @@ def plot(df: pd.DataFrame, start=None, end=None, **kwargs):
                 fig.add_trace(trend_refol, row=1, col=1)
 
     # fig.show(config=dict({'scrollZoom': True}))
+
+    # tools - vlines: vertical lines
+    vline_list = tools.pop('vlines') if 'vlines' in tools else {}
+    for vline in vline_list:
+        vline_args = dict(line_width=1.5, line_dash="dot", line_color="tomato", layer="below")
+        if type(vline) in [pd.Timestamp, str, datetime.datetime, datetime.date]:
+            vline_args['x'] = str(vline)
+        elif type(vline) == dict:
+            vline_args.update(vline)
+        else:
+            raise ValueError("'vlines' must be list of str or list of dict")
+        fig.add_vline(**vline_args)
+
+    # tools - vrects: highlighting regions
+    vrect_list = tools.pop('vrects') if 'vrects' in tools else {}
+    for vrect in vrect_list:
+        vrect_args = dict(fillcolor="LightSalmon", opacity=0.5, layer="below", line_width=0)
+        if type(vrect) == tuple:
+            vrect_args['x0'] = str(vrect[0])
+            vrect_args['x1'] = str(vrect[1])
+        elif type(vrect) == dict:
+            vrect_args.update(vrect)
+        else:
+            raise ValueError("'vrects' must be list of tuple or list of dict")
+        fig.add_vrect(**vrect_args)
 
     if params['save']:
         home_path = os.path.expanduser('~')
